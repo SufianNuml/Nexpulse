@@ -1,0 +1,6 @@
+faker
+python-dotenv
+confluent-kafka
+pytest
+black
+flake8
