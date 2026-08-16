@@ -1,0 +1,11 @@
+{
+  "event_id": "evt_10001",
+  "order_id": "ORD_5001",
+  "customer_id": "CUS_101",
+  "product_id": "PROD_25",
+  "quantity": 2,
+  "amount": 4500.00,
+  "currency": "PKR",
+  "timestamp": "2026-08-09T10:01:00Z",
+  "status": "completed"
+}

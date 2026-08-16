@@ -1,0 +1,8 @@
+{
+  "event_id": "evt_30001",
+  "product_id": "PROD_25",
+  "warehouse_id": "WH_01",
+  "stock_quantity": 148,
+  "supplier_id": "SUP_09",
+  "timestamp": "2026-08-09T10:01:10Z"
+}

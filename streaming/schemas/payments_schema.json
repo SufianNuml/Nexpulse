@@ -1,0 +1,9 @@
+{
+  "event_id": "evt_20001",
+  "payment_id": "PAY_7001",
+  "order_id": "ORD_5001",
+  "amount": 4500.00,
+  "payment_method": "card",
+  "status": "successful",
+  "timestamp": "2026-08-09T10:01:05Z"
+}
