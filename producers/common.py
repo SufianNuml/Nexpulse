@@ -1,7 +1,15 @@
 import json
+import os
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
+
+from confluent_kafka import Producer
+from dotenv import load_dotenv
+
+# Load variables from .env
+load_dotenv()
+
 
 # Accepted order statuses
 ORDER_STATUSES = [
@@ -48,3 +56,52 @@ def log_event(producer_name, event: dict):
 def maybe(probability: float) -> bool:
     """Return True with the given probability."""
     return random.random() < probability
+
+
+# ---------------------------------------------------------
+# Kafka configuration
+# ---------------------------------------------------------
+
+
+def build_kafka_config():
+    """Build Kafka client configuration from environment variables."""
+
+    bootstrap_servers = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
+
+    protocol = os.environ.get(
+        "KAFKA_SECURITY_PROTOCOL",
+        "PLAINTEXT",
+    )
+
+    config = {
+        "bootstrap.servers": bootstrap_servers,
+        "security.protocol": protocol,
+    }
+
+    # SASL settings are only required when using SASL_SSL.
+    if protocol == "SASL_SSL":
+        config["sasl.mechanisms"] = os.environ["KAFKA_SASL_MECHANISMS"]
+        config["sasl.username"] = os.environ["KAFKA_SASL_USERNAME"]
+        config["sasl.password"] = os.environ["KAFKA_SASL_PASSWORD"]
+
+    return config
+
+
+def get_producer():
+    """Create and return a Kafka Producer."""
+    return Producer(build_kafka_config())
+
+
+def delivery_report(err, msg):
+    """Report whether a Kafka message was delivered successfully."""
+
+    if err is not None:
+        print(
+            f"[kafka] delivery FAILED: {err}",
+            flush=True,
+        )
+    else:
+        print(
+            f"[kafka] delivered -> " f"{msg.topic()} " f"[partition {msg.partition()}]",
+            flush=True,
+        )

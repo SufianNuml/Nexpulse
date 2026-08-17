@@ -1,11 +1,18 @@
 import argparse
+import atexit
+import json
 import os
 import random
+import sys
 import time
 from collections import deque
 
-from producers.common import (
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from producers.common import (  # noqa: E402
     PAYMENT_STATUSES_WEIGHTED,
+    delivery_report,
+    get_producer,
     log_event,
     maybe,
     new_event_id,
@@ -14,6 +21,10 @@ from producers.common import (
 
 # Stores synthetic orders waiting for their payment
 pending_orders = deque()
+
+# Create one Kafka producer for this process
+kafka_producer = get_producer()
+atexit.register(lambda: kafka_producer.flush())
 
 
 def weighted_status():
@@ -88,6 +99,17 @@ def inject_dirty_data(event: dict) -> dict:
     return event
 
 
+def publish_payment(event):
+    """Publish a payment event to Kafka."""
+    kafka_producer.produce(
+        "payments",
+        key=event.get("order_id", "unknown"),
+        value=json.dumps(event),
+        callback=delivery_report,
+    )
+    kafka_producer.poll(0)
+
+
 def run(max_events):
     count = 0
 
@@ -112,6 +134,8 @@ def run(max_events):
             # Occasionally duplicate the payment event
             if maybe(0.01):
                 log_event("payments", event)
+                publish_payment(event)
+
                 count += 1
 
                 if max_events is not None and count >= max_events:
@@ -122,6 +146,9 @@ def run(max_events):
 
             # Print payment event
             log_event("payments", event)
+
+            # Publish payment event to Kafka
+            publish_payment(event)
 
             count += 1
 
@@ -153,3 +180,4 @@ if __name__ == "__main__":
             "\n[payments] shutting down gracefully",
             flush=True,
         )
+        kafka_producer.flush()

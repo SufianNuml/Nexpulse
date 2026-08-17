@@ -1,19 +1,23 @@
 import argparse
+import atexit
+import json
 import os
 import random
 import sys
 import time
 
-# Allow this file to import producers/common.py
+# Allow this file to import producers/common.py when run directly.
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from producers.common import (  # noqa: E402
-    now_iso,
+    ORDER_STATUSES,
+    delivery_report,
+    get_producer,
     late_iso,
-    new_event_id,
     log_event,
     maybe,
-    ORDER_STATUSES,
+    new_event_id,
+    now_iso,
 )
 
 # Small pools of IDs.
@@ -24,10 +28,15 @@ PRODUCT_POOL = [f"PROD_{i}" for i in range(1, 51)]
 CURRENCY = "PKR"
 
 
+# Create one Kafka producer for this process.
+kafka_producer = get_producer()
+
+# Make sure buffered Kafka messages are delivered when the program exits.
+atexit.register(lambda: kafka_producer.flush())
+
+
 def build_order_event(event_id_override=None):
-    """
-    Create one normal order event.
-    """
+    """Create one normal order event."""
 
     order_id = f"ORD_{random.randint(5000, 59999)}"
 
@@ -47,9 +56,7 @@ def build_order_event(event_id_override=None):
 
 
 def inject_dirty_data(event: dict) -> dict:
-    """
-    Occasionally introduce one realistic data-quality problem.
-    """
+    """Occasionally introduce one realistic data-quality problem."""
 
     if maybe(0.01):
         # Invalid amount: negative
@@ -78,37 +85,56 @@ def inject_dirty_data(event: dict) -> dict:
     return event
 
 
+def send_to_kafka(event: dict):
+    """Publish one order event to the Kafka orders topic."""
+
+    kafka_producer.produce(
+        "orders",
+        key=event.get("event_id", "unknown"),
+        value=json.dumps(event),
+        callback=delivery_report,
+    )
+
+    # Process delivery callbacks without blocking.
+    kafka_producer.poll(0)
+
+
 def run(events_per_sec_range, max_events):
-    """
-    Generate orders continuously or until max_events is reached.
-    """
+    """Generate orders continuously or until max_events is reached."""
 
     count = 0
     last_event = None
 
     while max_events is None or count < max_events:
 
-        # Create a normal order
+        # Create a normal order.
         event = build_order_event()
 
-        # Occasionally duplicate the previous event
+        # Occasionally duplicate the previous event.
         if last_event and maybe(0.01):
             log_event("orders", last_event)
+
+            # Send the duplicate to Kafka too.
+            send_to_kafka(last_event)
+
             count += 1
             continue
 
-        # Occasionally make the event dirty
+        # Occasionally make the event dirty.
         event = inject_dirty_data(event)
 
-        # Print event to console
+        # Print event to console.
         log_event("orders", event)
 
-        # Remember the event for possible duplication
+        # Send event to Kafka.
+        send_to_kafka(event)
+
+        # Remember the event for possible duplication.
         last_event = event
 
         count += 1
 
-        # Wait 1-3 seconds before next event
+        # Wait 1-3 seconds before the next event.
         time.sleep(random.uniform(*events_per_sec_range))
 
     print(
@@ -140,3 +166,6 @@ if __name__ == "__main__":
             "\n[orders] shutting down gracefully",
             flush=True,
         )
+
+        # Deliver any messages still waiting in the local buffer.
+        kafka_producer.flush()

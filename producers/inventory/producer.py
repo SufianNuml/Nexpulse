@@ -1,4 +1,6 @@
 import argparse
+import atexit
+import json
 import os
 import random
 import sys
@@ -7,7 +9,14 @@ import time
 # Allow this file to import producers/common.py
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))  # noqa: E402
 
-from producers.common import log_event, maybe, new_event_id, now_iso  # noqa: E402
+from producers.common import (  # noqa: E402
+    delivery_report,
+    get_producer,
+    log_event,
+    maybe,
+    new_event_id,
+    now_iso,
+)
 
 PRODUCT_POOL = [f"PROD_{i}" for i in range(1, 51)]
 WAREHOUSE_POOL = [f"WH_{i:02d}" for i in range(1, 6)]
@@ -20,6 +29,13 @@ stock_levels = {
     for product in PRODUCT_POOL
     for warehouse in WAREHOUSE_POOL
 }
+
+
+# Create one Kafka producer for this process
+kafka_producer = get_producer()
+
+# Make sure buffered Kafka messages are delivered when the process exits
+atexit.register(lambda: kafka_producer.flush())
 
 
 def build_inventory_event():
@@ -70,7 +86,19 @@ def run(max_events):
         event = build_inventory_event()
         event = inject_dirty_data(event)
 
+        # Keep console logging for visibility during local development
         log_event("inventory", event)
+
+        # Publish the same event to Kafka
+        kafka_producer.produce(
+            "inventory",
+            key=event.get("event_id", "unknown"),
+            value=json.dumps(event),
+            callback=delivery_report,
+        )
+
+        # Trigger delivery callbacks without blocking
+        kafka_producer.poll(0)
 
         count += 1
 
@@ -102,3 +130,4 @@ if __name__ == "__main__":
             "\n[inventory] shutting down gracefully",
             flush=True,
         )
+        kafka_producer.flush()
